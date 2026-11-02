@@ -25,7 +25,8 @@ static uint8_t crc8(const uint8_t *d, size_t n) {
 }
 
 static const int EE_OFFSET = 400;                        // 102 байта с 400-го: 400..501
-static const int EE_SIZE = 512;
+static const int EE_SIZE = 1024;
+static const int EE_PARAM_OFFSET = 512;                  // 512 байт с 512-го под свои поля портала
 #endif
 
 bool AlashWiFi::save(const char *ssid, const char *pass) {
@@ -93,7 +94,8 @@ bool AlashWiFi::forget() {
 #if defined(ESP32)
   Preferences p;
   if (!p.begin("alashwifi", false)) return false;
-  p.clear();
+  p.remove("s");
+  p.remove("p");
   p.end();
 #else
   EEPROM.begin(EE_SIZE);
@@ -102,6 +104,136 @@ bool AlashWiFi::forget() {
   EEPROM.end();
 #endif
   return true;
+}
+
+// ---- Свои поля портала ----------------------------------------------------------------------------------------
+
+AlashWiFi::~AlashWiFi() { for (uint8_t i = 0; i < _np; i++) free(_params[i].value); }
+
+static bool validParamId(const char *id) {
+  if (!id || !id[0] || strlen(id) > 13) return false;
+  for (const char *p = id; *p; p++) if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_')) return false;
+  return true;
+}
+
+int AlashWiFi::findParam(const char *id) const {
+  for (uint8_t i = 0; i < _np; i++) if (strcmp(_params[i].id, id) == 0) return i;
+  return -1;
+}
+
+bool AlashWiFi::addParam(const char *id, const char *label, const char *defaultValue, uint8_t maxLen) {
+  if (!validParamId(id) || findParam(id) >= 0 || _np >= ALASH_WIFI_MAX_PARAMS || maxLen == 0 || !defaultValue || strlen(defaultValue) > maxLen) { _err = ERR_BAD_PARAM; return false; }
+  size_t used = 0;
+  for (uint8_t i = 0; i < _np; i++) used += _params[i].maxLen + 1;
+  if (used + maxLen + 1 > 480) { _err = ERR_BAD_PARAM; return false; }          // в EEPROM ESP8266 отведено 512 байт под все поля
+  Param &p = _params[_np];
+  strncpy(p.id, id, 13); p.id[13] = 0;
+  strncpy(p.label, label ? label : id, 32); p.label[32] = 0;
+  p.maxLen = maxLen;
+  p.value = (char *)malloc(maxLen + 1);
+  if (!p.value) { _err = ERR_BAD_PARAM; return false; }
+  strcpy(p.value, defaultValue);
+  _np++;
+  _paramsLoaded = false;                                                          // состав полей изменился: значения перечитаем
+  return true;
+}
+
+size_t AlashWiFi::packParams(uint8_t *buf, size_t cap, char *const *values, const uint8_t *maxLens, uint8_t n) {
+  size_t need = 4;
+  for (uint8_t i = 0; i < n; i++) need += maxLens[i] + 1;
+  if (need > cap) return 0;
+  memset(buf, 0, need);
+  buf[0] = 0xA1; buf[1] = 0xA6; buf[2] = n;
+  size_t o = 4;
+  for (uint8_t i = 0; i < n; i++) { strncpy((char *)buf + o, values[i], maxLens[i]); o += maxLens[i] + 1; }
+  uint8_t c = 0;
+  for (size_t i = 4; i < need; i++) { c ^= buf[i]; for (uint8_t k = 0; k < 8; k++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x07) : (uint8_t)(c << 1); }
+  buf[3] = c;
+  return need;
+}
+
+bool AlashWiFi::unpackParams(const uint8_t *buf, size_t len, char *const *values, const uint8_t *maxLens, uint8_t n) {
+  size_t need = 4;
+  for (uint8_t i = 0; i < n; i++) need += maxLens[i] + 1;
+  if (len < need || buf[0] != 0xA1 || buf[1] != 0xA6 || buf[2] != n) return false;     // другой набор полей: читать нельзя
+  uint8_t c = 0;
+  for (size_t i = 4; i < need; i++) { c ^= buf[i]; for (uint8_t k = 0; k < 8; k++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x07) : (uint8_t)(c << 1); }
+  if (c != buf[3]) return false;
+  size_t o = 4;
+  for (uint8_t i = 0; i < n; i++) {
+    const char *s = (const char *)buf + o;
+    size_t l = strnlen(s, maxLens[i] + 1);
+    if (l > maxLens[i]) return false;
+    o += maxLens[i] + 1;
+  }
+  o = 4;
+  for (uint8_t i = 0; i < n; i++) { strncpy(values[i], (const char *)buf + o, maxLens[i]); values[i][maxLens[i]] = 0; o += maxLens[i] + 1; }
+  return true;
+}
+
+void AlashWiFi::loadParams() {
+  if (_paramsLoaded || _np == 0) { _paramsLoaded = true; return; }
+  _paramsLoaded = true;
+#if defined(ESP32)
+  Preferences p;
+  if (!p.begin("alashwifi", true)) return;
+  for (uint8_t i = 0; i < _np; i++) {
+    char key[16]; snprintf(key, sizeof key, "x_%s", _params[i].id);
+    if (!p.isKey(key)) continue;
+    String v = p.getString(key, "");
+    if (strlen(v.c_str()) <= _params[i].maxLen) strcpy(_params[i].value, v.c_str());
+  }
+  p.end();
+#else
+  char *vals[ALASH_WIFI_MAX_PARAMS]; uint8_t lens[ALASH_WIFI_MAX_PARAMS]; size_t total = 4;
+  for (uint8_t i = 0; i < _np; i++) { vals[i] = _params[i].value; lens[i] = _params[i].maxLen; total += lens[i] + 1; }
+  uint8_t *buf = (uint8_t *)malloc(total);
+  if (!buf) return;
+  EEPROM.begin(EE_SIZE);
+  for (size_t i = 0; i < total; i++) buf[i] = EEPROM.read(EE_PARAM_OFFSET + i);
+  EEPROM.end();
+  unpackParams(buf, total, vals, lens, _np);
+  free(buf);
+#endif
+}
+
+bool AlashWiFi::saveParams() {
+  if (_np == 0) return true;
+#if defined(ESP32)
+  Preferences p;
+  if (!p.begin("alashwifi", false)) return false;
+  for (uint8_t i = 0; i < _np; i++) { char key[16]; snprintf(key, sizeof key, "x_%s", _params[i].id); p.putString(key, _params[i].value); }
+  p.end();
+  return true;
+#else
+  char *vals[ALASH_WIFI_MAX_PARAMS]; uint8_t lens[ALASH_WIFI_MAX_PARAMS]; size_t total = 4;
+  for (uint8_t i = 0; i < _np; i++) { vals[i] = _params[i].value; lens[i] = _params[i].maxLen; total += lens[i] + 1; }
+  uint8_t *buf = (uint8_t *)malloc(total);
+  if (!buf) return false;
+  size_t n = packParams(buf, total, vals, lens, _np);
+  if (n == 0) { free(buf); return false; }
+  EEPROM.begin(EE_SIZE);
+  for (size_t i = 0; i < n; i++) EEPROM.write(EE_PARAM_OFFSET + i, buf[i]);
+  EEPROM.commit();
+  EEPROM.end();
+  free(buf);
+  return true;
+#endif
+}
+
+const char *AlashWiFi::param(const char *id) {
+  int i = id ? findParam(id) : -1;
+  if (i < 0) return "";
+  loadParams();
+  return _params[i].value;
+}
+
+bool AlashWiFi::setParam(const char *id, const char *value) {
+  int i = id ? findParam(id) : -1;
+  if (i < 0 || !value || strlen(value) > _params[i].maxLen) { _err = ERR_BAD_PARAM; return false; }
+  loadParams();
+  strcpy(_params[i].value, value);
+  return saveParams();
 }
 
 // ---- Подключение ---------------------------------------------------------------------------------------
@@ -242,7 +374,7 @@ void AlashWiFi::escapeHtml(const char *in, char *out, size_t size) {
 
 void AlashWiFi::sendRoot(AlashWebServerType &server) {
   String h;
-  h.reserve(2400);
+  h.reserve(2400 + 160 * _np);
   h += F("<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Wi-Fi</title>"
          "<style>body{font-family:sans-serif;max-width:420px;margin:0 auto;padding:16px}input,button{width:100%;box-sizing:border-box;padding:12px;margin:6px 0;font-size:16px}"
          "button{background:#0a7;color:#fff;border:0;border-radius:6px}li{padding:8px 0;border-bottom:1px solid #ddd;cursor:pointer}.e{color:#b00}</style></head><body><h2>");
@@ -272,11 +404,28 @@ void AlashWiFi::sendRoot(AlashWebServerType &server) {
     }
     h += F("</ul>");
   }
+  loadParams();
   h += F("<form method=post action=/save><input id=s name=s maxlength=32 placeholder='");
   h += TC("Имя сети", "Желі аты", "Network name");
-  h += F("' required><input name=p type=password maxlength=63 placeholder='");
+  h += hasSaved() ? F("'>") : F("' required>");                 // при сохранённой сети можно поменять только свои поля
+  h += F("<input name=p type=password maxlength=63 placeholder='");
   h += TC("Пароль", "Құпиясөз", "Password");
-  h += F("'><button>");
+  h += F("'>");
+  for (uint8_t i = 0; i < _np; i++) {
+    char esc[120];
+    h += F("<label>");
+    escapeHtml(_params[i].label, esc, sizeof esc);
+    h += esc;
+    h += F("</label><input name=q");
+    h += i;
+    h += F(" maxlength=");
+    h += _params[i].maxLen;
+    h += F(" value=\"");
+    escapeHtml(_params[i].value, esc, sizeof esc);
+    h += esc;
+    h += F("\">");
+  }
+  h += F("<button>");
   h += TC("Подключить", "Қосу", "Connect");
   h += F("</button></form><script>document.querySelectorAll('li').forEach(function(e){e.onclick=function(){document.getElementById('s').value=e.dataset.s}})</script></body></html>");
   server.send(200, "text/html; charset=utf-8", h);
@@ -320,7 +469,16 @@ bool AlashWiFi::startPortal(const char *apName, const char *apPassword, uint16_t
     char ssid[33], pass[64];
     urlDecode(server.arg("s").c_str(), ssid, sizeof ssid);
     urlDecode(server.arg("p").c_str(), pass, sizeof pass);
-    if (!validSsid(ssid) || !validPassword(pass)) {
+    bool keepSaved = !ssid[0] && hasSaved();                   // имя не вводили, сеть уже сохранена: меняются только свои поля
+    if (keepSaved) loadSaved(ssid, pass);
+    bool paramsOk = true;
+    for (uint8_t i = 0; i < _np; i++) {
+      char name[6], val[130];
+      snprintf(name, sizeof name, "q%u", i);
+      urlDecode(server.arg(name).c_str(), val, sizeof val);
+      if (strlen(val) > _params[i].maxLen) paramsOk = false; else strcpy(_params[i].value, val);
+    }
+    if (!paramsOk || !validSsid(ssid) || (!keepSaved && !validPassword(pass))) {
       _portalErr = ERR_BAD_INPUT;
       _err = ERR_BAD_INPUT;
       sendRoot(server);
@@ -347,6 +505,7 @@ bool AlashWiFi::startPortal(const char *apName, const char *apPassword, uint16_t
       delay(300);                                           // дать ответу уйти
       if (connectTo(_pSsid, _pPass, 15000)) {
         save(_pSsid, _pPass);
+        saveParams();
         ok = true;
       } else {
         _portalErr = _err;                                  // причина будет показана на странице при следующем заходе
@@ -418,6 +577,10 @@ const __FlashStringHelper *AlashWiFi::errorText() {
     case ERR_BAD_INPUT:
       return T("Имя сети от 1 до 32 символов, пароль пустой или от 8 до 63 символов", "Желі аты 1-32 таңба, құпиясөз бос не 8-63 таңба",
                "The network name is 1 to 32 characters, the password is empty or 8 to 63 characters");
+    case ERR_BAD_PARAM:
+      return T("Своё поле портала не добавлено: id из латинских букв, цифр и _ (до 13 символов), без повторов, не больше ALASH_WIFI_MAX_PARAMS полей, значение не длиннее maxLen, все поля вместе не больше 480 байт",
+               "Порталдың өз өрісі қосылмады: id латын әріптері, сандар және _ (13 таңбаға дейін), қайталанбай, ALASH_WIFI_MAX_PARAMS өрістен аспай, мән maxLen-нен ұзын емес, барлығы 480 байттан аспайды",
+               "The portal field was not added: id of Latin letters, digits and _ (up to 13 characters), no repeats, at most ALASH_WIFI_MAX_PARAMS fields, a value not longer than maxLen, all fields together at most 480 bytes");
   }
   return F("");
 }
@@ -430,6 +593,11 @@ void AlashWiFi::diagnose(Print &out, const char *ssid) {
     out.print(F("IP: ")); out.println(WiFi.localIP());
     out.print(T("Сеть: ", "Желі: ", "Network: ")); out.println(WiFi.SSID());
     out.print(T("Сигнал: ", "Сигнал: ", "Signal: ")); out.print(WiFi.RSSI()); out.print(F(" dBm, ")); out.println(signalText());
+  }
+  if (_np > 0) {
+    out.print(T("Поля портала: ", "Портал өрістері: ", "Portal fields: "));
+    for (uint8_t i = 0; i < _np; i++) { if (i) out.print(F(", ")); out.print(_params[i].id); out.print(F("=")); out.print(param(_params[i].id)); }
+    out.println(F(""));
   }
   int n = scan(out);
   if (ssid) {

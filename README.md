@@ -28,6 +28,7 @@ void loop() { wifi.update(); }               // переподключение �
 - **Понятные причины:** `errorText()` различает «сеть не найдена» (имя, расстояние, 5 ГГц), «пароль не подошёл» и «слабый сигнал / роутер не принял».
 - **Настройка с телефона:** `autoConnect("AlashSetup")`: плата создаёт сеть, страница на телефоне показывает список сетей вокруг, вы нажимаете на свою и вводите пароль. Страница на русском, казахском или английском.
 - **Запоминает сеть:** `save()`, `hasSaved()`, `forget()`; в памяти платы с контрольной суммой, пароль наружу не отдаётся.
+- **Свои поля на странице настройки:** `addParam("mqtt", "Адрес MQTT", "broker.local")`, значение потом в `param("mqtt")`; можно поправить только поля, не вводя сеть заново.
 - **Переподключается само:** `update()` в `loop()`; паузы растут 5, 10, 20, 40, 60 секунд, чтобы не донимать роутер.
 - **Защита от неверного ввода:** имя 1-32 символа, пароль пустой или 8-63; имена сетей на странице экранируются.
 - **Сканер:** `scan(Serial)` показывает сети, сигнал, канал, защищена ли; `diagnose(Serial, имя)` говорит, видна ли ваша.
@@ -41,10 +42,10 @@ void loop() { wifi.update(); }               // переподключение �
 - Нет подсказки про 2.4 ГГц, самую частую ошибку школьников: у нас она в тексте ошибки и в `diagnose()`.
 
 ### Примеры
-`Basic`, `AutoConnect`, `Scan`, `Diagnose`
+`Basic`, `AutoConnect`, `Scan`, `Diagnose`, `Params`
 
 ### Тесты
-Подключение, неверный пароль (быстро), сеть не найдена, сеть видна но не подключается, сохранение и забывание сети, автопереподключение с растущими паузами, портал настройки (страница со списком сетей и экранированием, captive-перенаправление, ошибка ввода, неверный и верный пароль, закрытие по времени, выключение точки доступа), autoConnect проверены без железа на имитации WiFi, WebServer, DNS и Preferences: `extras/test`.
+Подключение, неверный пароль (быстро), сеть не найдена, сеть видна но не подключается, сохранение и забывание сети, автопереподключение с растущими паузами, портал настройки (страница со списком сетей и экранированием, captive-перенаправление, ошибка ввода, неверный и верный пароль, закрытие по времени, выключение точки доступа), autoConnect проверены без железа на имитации WiFi, WebServer, DNS и Preferences: `extras/test`. Версия 1.1.0: свои поля портала проверены так же (проверка id, повторы, лимиты, форма с экранированием, ввод и сохранение, правка только полей при сохранённой сети, формат хранения ESP8266 с контрольной суммой и защитой от смены набора полей).
 
 Подробное руководство: [docs/WIKI.md](docs/WIKI.md).
 
@@ -74,6 +75,7 @@ void loop() { wifi.update(); }               // переподключение �
 - **Түсінікті себептер:** `errorText()` «желі табылмады», «құпиясөз сәйкес емес», «сигнал әлсіз» айырады.
 - **Телефоннан баптау:** `autoConnect("AlashSetup")`: тақта желі жасайды, телефондағы бет айналадағы желілерді көрсетеді.
 - **Желіні есте сақтайды:** `save()`, `hasSaved()`, `forget()`.
+- **Баптау бетіндегі өз өрістері:** `addParam("mqtt", "MQTT мекенжайы", "broker.local")`, мән кейін `param("mqtt")` арқылы; желіні қайта енгізбей тек өрістерді түзетуге болады.
 - **Өзі қайта қосылады:** `update()`; кідірістер 5, 10, 20, 40, 60 секунд.
 - **Қате енгізуден қорғау:** аты 1-32 таңба, құпиясөз бос не 8-63.
 - **Сканер:** `scan(Serial)`; `diagnose(Serial, аты)`.
@@ -87,10 +89,10 @@ WiFiManager (tzapu), WiFiMulti және курс мысалдарын қарад
 - 2.4 ГГц туралы кеңес бізде.
 
 ### Мысалдар
-`Basic`, `AutoConnect`, `Scan`, `Diagnose`
+`Basic`, `AutoConnect`, `Scan`, `Diagnose`, `Params`
 
 ### Тесттер
-Қосылу, қате құпиясөз, желі табылмауы, сақтау, автоқосылу, баптау порталы, autoConnect тексерілген: `extras/test`.
+Қосылу, қате құпиясөз, желі табылмауы, сақтау, автоқосылу, баптау порталы, autoConnect тексерілген: `extras/test`. 1.1.0 нұсқасы: порталдың өз өрістері де осылай тексерілген.
 
 Толық нұсқаулық: [docs/WIKI.md](docs/WIKI.md).
 
@@ -120,6 +122,7 @@ void loop() { wifi.update(); }               // переподключение �
 - **Clear reasons:** `errorText()` tells "network not found" (name, distance, 5 GHz), "the password was rejected" and "weak signal / the router refused".
 - **Phone setup:** `autoConnect("AlashSetup")`: the board creates a network, a page on the phone lists the networks around, you tap yours and type the password. The page is in Russian, Kazakh or English.
 - **Remembers the network:** `save()`, `hasSaved()`, `forget()`; stored with a checksum, the password is never handed back.
+- **Your own fields on the setup page:** `addParam("mqtt", "MQTT address", "broker.local")`, the value is then in `param("mqtt")`; you can change only the fields without re-entering the network.
 - **Reconnects by itself:** `update()` in `loop()`; the delays grow 5, 10, 20, 40, 60 seconds so the router is not pestered.
 - **Input protection:** name 1-32 characters, password empty or 8-63; network names on the page are HTML-escaped.
 - **Scanner:** `scan(Serial)` shows networks, signal, channel and whether secured; `diagnose(Serial, name)` says if yours is visible.
@@ -133,10 +136,10 @@ We looked at WiFiManager (tzapu), WiFiMulti and course examples:
 - No tip about 2.4 GHz, the most common student mistake; ours is in the error text and in `diagnose()`.
 
 ### Examples
-`Basic`, `AutoConnect`, `Scan`, `Diagnose`
+`Basic`, `AutoConnect`, `Scan`, `Diagnose`, `Params`
 
 ### Tests
-Connecting, a wrong password (fast), network not found, visible but not connecting, saving and forgetting a network, auto-reconnect with growing delays, the setup portal (page with an escaped network list, captive redirect, input errors, wrong then right password, timeout, access point shutdown) and autoConnect are checked without hardware on simulated WiFi, WebServer, DNS and Preferences: `extras/test`.
+Connecting, a wrong password (fast), network not found, visible but not connecting, saving and forgetting a network, auto-reconnect with growing delays, the setup portal (page with an escaped network list, captive redirect, input errors, wrong then right password, timeout, access point shutdown) and autoConnect are checked without hardware on simulated WiFi, WebServer, DNS and Preferences: `extras/test`. Version 1.1.0: the portal's own fields are checked the same way (id validation, duplicates, limits, a form with escaping, input and saving, editing only the fields when a network is saved, the ESP8266 storage format with checksum and protection from a changed field set).
 
 Full guide: [docs/WIKI.md](docs/WIKI.md).
 

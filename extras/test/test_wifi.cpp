@@ -124,6 +124,84 @@ int main() {
   reset(); WiFi.aps.clear(); Print o4; d.diagnose(o4); CHECK(has(o4.log, "Сетей не видно совсем"));
   d.setLanguage(AlashWiFi::LANG_KK); CHECK(strlen((const char *)d.errorText()) == 2);   // ERR_OK: "OK"
 
+  // 11) свои поля портала: проверка id, значения по умолчанию, сохранение
+  {
+    reset(); AlashWiFi f;
+    CHECK(f.addParam("mqtt", "MQTT сервер", "broker.local", 40) && f.addParam("token", "Токен", "", 20));
+    CHECK(!f.addParam("", "x") && !f.addParam("bad id", "x") && !f.addParam("has-dash", "x") && !f.addParam("averyveryverylongid", "x") && f.error() == AlashWiFi::ERR_BAD_PARAM);
+    f.clearError(); CHECK(!f.addParam("mqtt", "dup") && f.error() == AlashWiFi::ERR_BAD_PARAM);
+    f.clearError(); CHECK(!f.addParam("long", "x", "this default is too long", 5) && !f.addParam("zero", "x", "", 0));
+    CHECK(f.addParam("a", "a") && f.addParam("b", "b") && f.addParam("c", "c") && f.addParam("d", "d") && f.paramCount() == 6);
+    f.clearError(); CHECK(!f.addParam("seventh", "7") && f.error() == AlashWiFi::ERR_BAD_PARAM);   // больше ALASH_WIFI_MAX_PARAMS
+    CHECK(strcmp(f.param("mqtt"), "broker.local") == 0 && strcmp(f.param("token"), "") == 0 && strcmp(f.param("nope"), "") == 0 && strcmp(f.param(nullptr), "") == 0);
+    AlashWiFi big; CHECK(big.addParam("p1", "p", "", 200) && big.addParam("p2", "p", "", 200) && !big.addParam("p3", "p", "", 100));   // 480 байт на все поля
+
+    // setParam сохраняет и переживает «перезагрузку»
+    CHECK(f.setParam("token", "abc123") && !f.setParam("token", "this token is far too long for twenty") && !f.setParam("zzz", "x"));
+    AlashWiFi f2; f2.addParam("mqtt", "MQTT", "other.default", 40); f2.addParam("token", "T", "", 20);
+    CHECK(strcmp(f2.param("token"), "abc123") == 0 && strcmp(f2.param("mqtt"), "broker.local") == 0);   // сохраняются все поля сразу: сохранённое значение важнее defaults нового объекта
+    f2.save("Home-2G", "secret123"); f2.forget(); AlashWiFi f3; f3.addParam("token", "T", "", 20);
+    CHECK(strcmp(f3.param("token"), "abc123") == 0);                                           // forget() забывает сеть, но не поля
+  }
+
+  // 12) портал с полями: форма, экранирование, ввод, сохранение; потом правка только полей при сохранённой сети
+  {
+    reset(); AlashWiFi pp; Print lg; pp.setProgress(&lg);
+    pp.addParam("mqtt", "Адрес <MQTT>", "br\"oker", 30); pp.addParam("name", "Имя", "robot1", 12);
+    t0 = g_ms; stage = 0; g_onDelay = []() {
+      uint32_t t = g_ms - t0;
+      if (stage == 0 && t > 500) { g_httpQueue.push_back({"/", {}}); stage = 1; }
+      if (stage == 1 && t > 1500) { g_httpQueue.push_back({"/save", {{"s", "Home-2G"}, {"p", "secret123"}, {"q0", "mqtt.example.kz"}, {"q1", "this value is much too long"}}}); stage = 2; }   // q1 длиннее 12
+      if (stage == 2 && t > 2500) { g_httpQueue.push_back({"/save", {{"s", "Home-2G"}, {"p", "secret123"}, {"q0", "mqtt.example.kz"}, {"q1", "rob%C3%B3+2"}}}); stage = 3; }
+    };
+    CHECK(pp.startPortal("AlashSetup", "", 60) && pp.isConnected());
+    CHECK(g_httpResp.size() >= 3);
+    CHECK(has(g_httpResp[0].body, "Адрес &lt;MQTT&gt;") && !has(g_httpResp[0].body, "Адрес <MQTT>"));      // подписи экранированы
+    CHECK(has(g_httpResp[0].body, "name=q0 maxlength=30 value=\"br&quot;oker\"") && has(g_httpResp[0].body, "name=q1 maxlength=12 value=\"robot1\""));
+    CHECK(has(g_httpResp[0].body, "required"));                                                             // сеть ещё не сохранена: имя обязательно
+    CHECK(has(g_httpResp[1].body, "Имя сети от 1 до 32"));                                                  // слишком длинное значение отвергнуто
+    CHECK(has(g_httpResp[2].body, "Данные приняты"));
+    CHECK(strcmp(pp.param("mqtt"), "mqtt.example.kz") == 0 && strcmp(pp.param("name"), "robó 2") == 0);
+    AlashWiFi after; after.addParam("mqtt", "x", "", 30); after.addParam("name", "y", "", 12);
+    CHECK(strcmp(after.param("mqtt"), "mqtt.example.kz") == 0 && strcmp(after.param("name"), "robó 2") == 0);   // после перезагрузки значения на месте
+
+    // сеть сохранена: имя не обязательно, пустое имя оставляет сохранённую сеть и меняет только поля
+    g_httpQueue.clear(); g_httpResp.clear(); t0 = g_ms; stage = 0;
+    g_onDelay = []() {
+      uint32_t t = g_ms - t0;
+      if (stage == 0 && t > 500) { g_httpQueue.push_back({"/", {}}); stage = 1; }
+      if (stage == 1 && t > 1500) { g_httpQueue.push_back({"/save", {{"s", ""}, {"p", ""}, {"q0", "new.host"}, {"q1", "robot9"}}}); stage = 2; }
+    };
+    WiFi.dropConnection();
+    CHECK(after.startPortal("AlashSetup", "", 60) && after.isConnected());
+    CHECK(!has(g_httpResp[0].body, " required") && has(g_httpResp[0].body, "value=\"mqtt.example.kz\""));
+    CHECK(strcmp(after.param("mqtt"), "new.host") == 0);
+    char nm[33]; CHECK(after.savedSsid(nm, sizeof nm) && strcmp(nm, "Home-2G") == 0);                     // сеть та же
+    AlashWiFi again; again.addParam("mqtt", "x", "", 30); CHECK(strcmp(again.param("mqtt"), "new.host") == 0);
+
+    // diagnose показывает поля
+    Print dg; after.diagnose(dg); CHECK(has(dg.log, "Поля портала") && has(dg.log, "mqtt=new.host"));
+  }
+
+  // 13) формат хранения для ESP8266: упаковка, проверка суммы, смена набора полей
+  {
+    char v1[11] = "hello", v2[6] = "wifi"; char *vals[2] = {v1, v2}; uint8_t lens[2] = {10, 5};
+    uint8_t buf[64]; size_t n = AlashWiFi::packParams(buf, sizeof buf, vals, lens, 2);
+    CHECK(n == 4 + 11 + 6 && buf[0] == 0xA1 && buf[2] == 2);
+    char r1[11] = "", r2[6] = ""; char *rv[2] = {r1, r2};
+    CHECK(AlashWiFi::unpackParams(buf, n, rv, lens, 2) && strcmp(r1, "hello") == 0 && strcmp(r2, "wifi") == 0);
+    uint8_t bad[64]; memcpy(bad, buf, n); bad[6] ^= 0x10;
+    CHECK(!AlashWiFi::unpackParams(bad, n, rv, lens, 2));                                       // порча: сумма не сошлась
+    uint8_t other[2] = {10, 6}; CHECK(AlashWiFi::unpackParams(buf, n, rv, other, 2) == false);   // длины полей другие: сумма или размер не подходят
+    CHECK(!AlashWiFi::unpackParams(buf, n, rv, lens, 1));                                       // другое число полей
+    uint8_t blank[64]; memset(blank, 0xFF, sizeof blank); CHECK(!AlashWiFi::unpackParams(blank, n, rv, lens, 2));   // чистая память
+    CHECK(AlashWiFi::packParams(buf, 10, vals, lens, 2) == 0);                                   // не помещается
+    AlashWiFi q; q.addParam("a", "a", "", 4); q.addParam("a2", "a", "", 4); q.setLanguage(AlashWiFi::LANG_KK);
+    q.addParam("a", "dup"); const char *kk = (const char *)q.errorText(); q.setLanguage(AlashWiFi::LANG_EN); const char *en = (const char *)q.errorText();
+    q.setLanguage(AlashWiFi::LANG_RU); const char *ru = (const char *)q.errorText();
+    CHECK(q.error() == AlashWiFi::ERR_BAD_PARAM && strlen(ru) > 20 && strcmp(ru, kk) && strcmp(kk, en));
+  }
+
   if (fails) { printf("FAILED: %d\n", fails); return 1; }
   printf("ALL TESTS PASSED\n");
   return 0;

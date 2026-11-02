@@ -17,6 +17,10 @@ typedef WebServer AlashWebServerType;
 typedef ESP8266WebServer AlashWebServerType;
 #endif
 
+#ifndef ALASH_WIFI_MAX_PARAMS
+#define ALASH_WIFI_MAX_PARAMS 6                          // сколько своих полей можно добавить на страницу портала
+#endif
+
 class AlashWiFi {
  public:
   enum Error : uint8_t {
@@ -26,7 +30,8 @@ class AlashWiFi {
     ERR_TIMEOUT,           // подключиться не удалось за отведённое время
     ERR_NO_CREDENTIALS,    // сохранённого имени и пароля нет
     ERR_PORTAL_TIMEOUT,    // портал настройки закрыт по времени: никто не ввёл данные
-    ERR_BAD_INPUT          // имя пустое или длиннее 32 символов; пароль 1-7 или больше 63 символов
+    ERR_BAD_INPUT,         // имя пустое или длиннее 32 символов; пароль 1-7 или больше 63 символов
+    ERR_BAD_PARAM          // свой параметр портала: плохой id, повтор, слишком много или не хватает места
   };
   enum Language : uint8_t { LANG_RU = 0, LANG_KK = 1, LANG_EN = 2 };
 
@@ -37,6 +42,20 @@ class AlashWiFi {
   // Как у WiFiManager: сохранённая сеть, а если не получилось, портал настройки с телефона (точка доступа apName).
   bool autoConnect(const char *apName = "AlashSetup", const char *apPassword = "", uint16_t portalTimeoutSec = 180, uint16_t connectTimeoutMs = 15000);
   bool startPortal(const char *apName = "AlashSetup", const char *apPassword = "", uint16_t timeoutSec = 180);
+
+  // ---- Свои поля на странице портала (адрес MQTT, токен бота, имя устройства) ----------------------------
+  // Добавлять до autoConnect() / startPortal(). id: латиница, цифры и _ (до 13 символов). Значения сохраняются вместе с сетью.
+  AlashWiFi() {}
+  ~AlashWiFi();
+  AlashWiFi(const AlashWiFi &) = delete;
+  AlashWiFi &operator=(const AlashWiFi &) = delete;
+  bool addParam(const char *id, const char *label, const char *defaultValue = "", uint8_t maxLen = 40);
+  const char *param(const char *id);                     // текущее значение: введённое в портале или по умолчанию; "" если id нет
+  bool setParam(const char *id, const char *value);      // задать и сохранить из кода
+  uint8_t paramCount() const { return _np; }
+  // Формат хранения для ESP8266 (EEPROM), доступен для тестов
+  static size_t packParams(uint8_t *buf, size_t cap, char *const *values, const uint8_t *maxLens, uint8_t n);
+  static bool unpackParams(const uint8_t *buf, size_t len, char *const *values, const uint8_t *maxLens, uint8_t n);
 
   // ---- Состояние ---------------------------------------------------------------------------
   bool isConnected() const { return WiFi.status() == WL_CONNECTED; }
@@ -59,6 +78,7 @@ class AlashWiFi {
   // ---- Диагностика ---------------------------------------------------------------------------
   int scan(Print &out);                                  // найденные сети с уровнем сигнала; возвращает их число
   Error error() const { return _err; }
+  void clearError() { _err = ERR_OK; }
   void setLanguage(Language lang) { _lang = lang; }
   const __FlashStringHelper *errorText();
   void diagnose(Print &out, const char *ssid = nullptr); // что видит плата вокруг и что не так с подключением к ssid
@@ -85,6 +105,12 @@ class AlashWiFi {
   char _pSsid[33] = {0}, _pPass[64] = {0};
   Error _portalErr = ERR_OK;
   int _portalNets = 0;
+  struct Param { char id[14]; char label[33]; uint8_t maxLen; char *value; };
+  Param _params[ALASH_WIFI_MAX_PARAMS];
+  uint8_t _np = 0; bool _paramsLoaded = false;
+  int findParam(const char *id) const;
+  void loadParams();
+  bool saveParams();
   void sendRoot(AlashWebServerType &server);
   void sendSaved(AlashWebServerType &server);
 };
