@@ -1,6 +1,12 @@
-// AlashWiFi: настройка Wi-Fi с телефона, без пароля в скетче (как у WiFiManager).
-// Первый запуск: плата создаёт Wi-Fi сеть "AlashSetup". Подключитесь к ней телефоном, откроется страница: выберите свою сеть и введите пароль.
-// Плата запомнит сеть и при следующих включениях подключится сама. Забыть сеть: wifi.forget() (например, по долгому нажатию кнопки).
+// [ru] AlashWiFi: настройка Wi-Fi с телефона, без пароля в скетче (как у WiFiManager).
+//      Первый запуск: плата создаёт Wi-Fi сеть "AlashSetup". Подключитесь к ней телефоном, откроется страница: выберите свою сеть и введите пароль.
+//      Плата запомнит сеть и при следующих включениях подключится сама. Забыть сеть: wifi.forget() (например, по долгому нажатию кнопки).
+// [kk] AlashWiFi: Wi-Fi-ды телефоннан баптау, скетчте құпиясөзсіз (WiFiManager сияқты).
+//      Алғашқы іске қосу: тақта "AlashSetup" Wi-Fi желісін жасайды. Оған телефонмен қосылыңыз, бет ашылады: өз желіңізді таңдап, құпиясөзді енгізіңіз.
+//      Тақта желіні есте сақтайды және келесі қосуларда өзі қосылады. Желіні ұмыту: wifi.forget() (мысалы, батырманы ұзақ басқанда).
+// [en] AlashWiFi: setting up Wi-Fi from a phone, without a password in the sketch (like WiFiManager).
+//      The first start: the board creates a Wi-Fi network "AlashSetup". Connect to it with a phone, a page opens: choose your network and enter the password.
+//      The board remembers the network and connects by itself on the next power-ons. To forget the network: wifi.forget() (for example on a long button press).
 #include <AlashWiFi.h>
 
 AlashWiFi wifi;

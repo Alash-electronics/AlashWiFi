@@ -1,6 +1,6 @@
 {
   "name": "AlashWiFi",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Easy Wi-Fi for ESP32/ESP8266: clear errors, auto-reconnect, saved network, phone setup portal (WiFiManager-like), clear tips (ru/kk/en)",
   "keywords": "WiFi, ESP32, ESP8266, captive portal, WiFiManager, reconnect, provisioning, scan",
   "repository": {

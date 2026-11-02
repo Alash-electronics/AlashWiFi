@@ -1,4 +1,6 @@
-// AlashWiFi: не подключается? Скетч покажет сети вокруг, видна ли ваша, и подскажет причину (имя, пароль, диапазон 2.4 ГГц, расстояние).
+// [ru] AlashWiFi: не подключается? Скетч покажет сети вокруг, видна ли ваша, и подскажет причину (имя, пароль, диапазон 2.4 ГГц, расстояние).
+// [kk] AlashWiFi: қосылмай ма? Скетч айналадағы желілерді, сіздікінің көрінетінін көрсетеді және себебін айтады (аты, құпиясөз, 2.4 ГГц диапазоны, қашықтық).
+// [en] AlashWiFi: does not connect? The sketch shows the networks around, whether yours is visible, and tells the reason (name, password, 2.4 GHz band, distance).
 #include <AlashWiFi.h>
 
 AlashWiFi wifi;
